@@ -133,3 +133,6 @@ dmypy.json
 cython_debug/
 
 /data
+
+ne_10m_admin_1_states_provinces.zip
+map/
