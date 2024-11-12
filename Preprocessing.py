@@ -7,9 +7,9 @@ import pandas as pd
 import os
 
 path = os.getcwd()
-path_trump = path + "\\data\\hashtag_donaldtrump.csv"
+path_trump = os.path.join(path, "data", "hashtag_donaldtrump.csv")
 trump = pd.read_csv(path_trump, lineterminator="\n")
-path_biden = path + "\\data\\hashtag_joebiden.csv"
+path_biden = os.path.join(path, "data", "hashtag_joebiden.csv")
 biden = pd.read_csv(path_biden, lineterminator="\n")
 trump["source"] = "Trump"
 biden["source"] = "Biden"
@@ -23,6 +23,7 @@ us_states = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado
              "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming"]
 
 df =df[df["state"].isin(us_states)]
+df["tweet"] = df["tweet"].str.lower().str.replace(r'\s+', ' ', regex=True)
 print(len(df))
 
 
@@ -79,7 +80,6 @@ filtered_tweets = df[(mask_trump & ~mask_biden) ^ (mask_biden & ~mask_trump)]
 
 filtered_tweets_trump = df[mask_trump & ~mask_biden]
 filtered_tweets_biden = df[mask_biden & ~mask_trump]
-
 
 
 #%%
