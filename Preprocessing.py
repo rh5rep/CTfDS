@@ -5,6 +5,7 @@ filtered_tweets includes all the tweets that mention either Trump or Biden but n
 """
 import pandas as pd
 import os
+import re
 
 path = os.getcwd()
 path_trump = path + "\\data\\hashtag_donaldtrump.csv"
@@ -16,6 +17,15 @@ biden["source"] = "Biden"
 # Concatenate and remove duplicates
 df = pd.concat([trump, biden], ignore_index=True)
 df = df.drop_duplicates()
+
+# Replace URLs with a placeholder text
+df["tweet"] = df["tweet"].apply(lambda x: re.sub(r'http\S+', '[]', x))
+# Drop duplicates based on the cleaned tweet text
+df = df.drop_duplicates(subset=["tweet"])
+
+
+
+
 us_states = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "District of Columbia", "Florida", 
              "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", 
              "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", 
