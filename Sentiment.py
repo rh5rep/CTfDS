@@ -12,19 +12,42 @@ filtered_tweets["likely_party"] = 0  # 0 for unsure, 1 for dem, 2 for rep
 
 #%%
 from process_tweet import process_tweet
+import spacy
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 sid = SentimentIntensityAnalyzer()
+nlp = spacy.load("en_core_web_lg")
+
+analyzer = SentimentIntensityAnalyzer()
+
 
 # Process tweets and calculate sentiment scores
 def analyze_sentiment(row):
     tweet = process_tweet(row["tweet"])
-    sentiment_dict = sid.polarity_scores(tweet)
+    # sentiment_dict = sid.polarity_scores(tweet)
+    doc = nlp(tweet)
+    # print(doc)
+    
+    # Extract the context from the sentence
+    context = ' '.join([token.text for token in doc if token.dep_ in ('nsubj', 'dobj', 'pobj', 'ROOT')])
+    
+    # Get the sentiment score from VADER for the context
+    sentiment_dict = analyzer.polarity_scores(context)
     row['positive'] = sentiment_dict['pos']
     row['neutral'] = sentiment_dict['neu']
     row['negative'] = sentiment_dict['neg']
     row['compound'] = sentiment_dict['compound']
     
     if (sentiment_dict['compound'] < 0.05) and (sentiment_dict['compound'] >= 0) :
-        row['likely_party'] = 0
+        
+        sentiment_dict2 = sid.polarity_scores(tweet)
+        if sentiment_dict2['compound'] == 0:
+            row['likely_party'] = 0
+        elif row["tweet_about"] == "biden":
+            row['likely_party'] = 1 if sentiment_dict2['compound'] > 0 else 2
+        elif row["tweet_about"] == "trump":
+            row['likely_party'] = 2 if sentiment_dict2['compound'] > 0 else 1
+        
+        # row['likely_party'] = 0
     elif row["tweet_about"] == "biden":
         row['likely_party'] = 1 if sentiment_dict['compound'] > 0 else 2
     elif row["tweet_about"] == "trump":
@@ -37,12 +60,12 @@ filtered_tweets = filtered_tweets.apply(analyze_sentiment, axis=1)
 
 #%%
 import pickle as pkl
-with open('filtered_tweets.pkl', 'wb') as f:
+with open('filtered_tweets_nlp_2.pkl', 'wb') as f:
     pkl.dump(filtered_tweets, f)
 
 # %%
 import pickle as pkl
-loaded = pkl.load(open('filtered_tweets.pkl', 'rb'))
+loaded = pkl.load(open('filtered_tweets_nlp_2.pkl', 'rb'))
 print(loaded.columns)
 nue,dem,rep = 0,0,0
 for i in loaded["likely_party"]:
