@@ -15,7 +15,8 @@ trump["source"] = "Trump"
 biden["source"] = "Biden"
 # Concatenate and remove duplicates
 df = pd.concat([trump, biden], ignore_index=True)
-df = df.drop_duplicates()
+df = df.drop_duplicates(subset=["tweet"])
+df = df.dropna(subset=["tweet"])
 us_states = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "District of Columbia", "Florida", 
              "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", 
              "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", 
@@ -75,12 +76,16 @@ mask_trump = df["tweet"].str.contains(pattern_trump, case=False, na=False)
 mask_biden = df["tweet"].str.contains(pattern_biden, case=False, na=False)
 
 # Combine the masks to filter for tweets containing Trump names but not Biden names or vice versa
-filtered_tweets = df[(mask_trump & ~mask_biden) ^ (mask_biden & ~mask_trump)]
-
+testdf = df.copy()
+testdf["tweet_about"] = "None"
 filtered_tweets_trump = df[mask_trump & ~mask_biden]
 filtered_tweets_biden = df[mask_biden & ~mask_trump]
 
+testdf.loc[mask_trump & ~mask_biden, 'tweet_about'] = 'trump'
+testdf.loc[mask_biden & ~mask_trump, 'tweet_about'] = 'biden'
 
+filtered_tweets = testdf[(mask_trump & ~mask_biden) ^ (mask_biden & ~mask_trump)]
+filtered_tweets = filtered_tweets.drop_duplicates(subset=["tweet"])
 
 #%%
 print(len(filtered_tweets))
