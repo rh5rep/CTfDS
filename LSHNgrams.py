@@ -1,38 +1,85 @@
 from datasketch import MinHash, MinHashLSH
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 import networkx as nx
 from collections import defaultdict
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 from Preprocessing import df
 from community import community_louvain
 import plotly.graph_objects as go
 import plotly.express as px  # for colors
+from concurrent.futures import ThreadPoolExecutor
+import itertools
+from plotly.subplots import make_subplots
+from process_tweet import process_tweet
+import math
 
 
 
-def create_shingles(text: str, q: int = 5) -> Set[str]:
-    """Convert text into q-grams (shingles)"""
-    return {text[i:i+q] for i in range(len(text)-q+1)}
+POLITICAL_STOP_WORDS = [
+    'trump', 'biden', 'donald', 'joe', 'potus', '2020', 'trumps'
+    'election']
 
-def create_minhash(shingles: Set[str], num_perm: int = 128) -> MinHash:
-    """Create MinHash object from shingles"""
-    m = MinHash(num_perm=num_perm)
-    for shingle in shingles:
-        m.update(shingle.encode('utf-8'))
-    return m
+# Combine with English stop words
+CUSTOM_STOP_WORDS = list(ENGLISH_STOP_WORDS) + POLITICAL_STOP_WORDS
 
-def extract_top_terms(texts: List[str], n_terms: int = 5) -> List[str]:
-    """Extract the most significant terms from a group of tweets using TF-IDF"""
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
-    tfidf_matrix = vectorizer.fit_transform(texts)
+
+def create_shingles(text: str, n: int = 2) -> Set[str]:
+    """Convert text into n-grams (shingles) at the word level."""
+    words = text.split()  # Split the text into words
+    if len(words) < n:
+        return set()
+    return set(" ".join(words[i:i+n]) for i in range(len(words) - n + 1))
+
+
+def batch_minhash(docs: Dict[int, str], batch_size: int = 1000, num_perm: int = 128, q: int = 5) -> Dict[int, MinHash]:
+    """Create MinHash objects in batches"""
+    minhashes = {}
     
-    avg_scores = np.array(tfidf_matrix.mean(axis=0))[0]
-    top_indices = avg_scores.argsort()[-n_terms:][::-1]
+    def process_batch(batch_items):
+        batch_results = {}
+        for doc_id, text in batch_items:
+            m = MinHash(num_perm=num_perm)
+            shingles = create_shingles(text, n=2)
+            for shingle in shingles:
+                m.update(shingle.encode('utf-8'))
+            batch_results[doc_id] = m
+        return batch_results
     
-    feature_names = vectorizer.get_feature_names_out()
-    return [feature_names[i] for i in top_indices]
+    # Process documents in batches
+    items = list(docs.items())
+    with ThreadPoolExecutor() as executor:
+        futures = []
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i+batch_size]
+            futures.append(executor.submit(process_batch, batch))
+        
+        for future in futures:
+            minhashes.update(future.result())
+    
+    return minhashes
+
+def find_candidate_pairs(minhashes: Dict[int, MinHash], threshold: float, 
+                        num_bands: int = 24) -> Set[Tuple[int, int]]:
+    """Find candidate pairs using LSH with banding technique"""
+    n_rows = len(next(iter(minhashes.values())).hashvalues) // num_bands
+    candidate_pairs = set()
+    
+    for band in range(num_bands):
+        band_buckets = defaultdict(list)
+        
+        # Hash document signatures within the current band
+        for doc_id, minhash in minhashes.items():
+            band_values = tuple(minhash.hashvalues[band * n_rows:(band + 1) * n_rows])
+            band_buckets[band_values].append(doc_id)
+        
+        # Generate candidate pairs from documents in the same bucket
+        for bucket in band_buckets.values():
+            if len(bucket) > 1:
+                candidate_pairs.update(itertools.combinations(sorted(bucket), 2))
+    
+    return candidate_pairs
 
 def merge_similar_clusters(clusters: Dict[int, Dict], docs: Dict[int, str], target_clusters: int) -> Dict[int, Dict]:
     """Merge similar clusters until reaching target number of clusters"""
@@ -87,55 +134,47 @@ def merge_similar_clusters(clusters: Dict[int, Dict], docs: Dict[int, str], targ
     
     return clusters
 
+def extract_top_terms(texts: List[str], n_terms: int = 5) -> List[str]:
+    """Extract the most significant terms from a group of tweets using TF-IDF"""
+    vectorizer = TfidfVectorizer(stop_words=CUSTOM_STOP_WORDS, max_features=1000)
+    tfidf_matrix = vectorizer.fit_transform(texts)
+    
+    avg_scores = np.array(tfidf_matrix.mean(axis=0))[0]
+    top_indices = avg_scores.argsort()[-n_terms:][::-1]
+    
+    feature_names = vectorizer.get_feature_names_out()
+    return [feature_names[i] for i in top_indices]
+
 def find_topic_clusters(docs: Dict[int, str], 
                        threshold: float = 0.05,
                        num_perm: int = 120,
-                       q: int = 5,
+                       q: int = 4,
                        min_cluster_size: int = 5,
                        n_clusters: int = 10) -> Dict[int, Dict]:
     """
-    Find a specified number of topic clusters using LSH and community detection
-    
-    Args:
-        docs: Dictionary of document IDs and their text
-        threshold: Jaccard similarity threshold
-        num_perm: Number of permutations for MinHash
-        q: Size of shingles
-        min_cluster_size: Minimum number of documents in a cluster
-        n_clusters: Target number of clusters
-    
-    Returns:
-        Dictionary mapping cluster IDs to cluster information
+    Optimized version of topic clustering using LSH and banding technique
     """
-    # Initialize LSH index and similarity graph
-    lsh = MinHashLSH(threshold=threshold, num_perm=num_perm)
+    # Initialize similarity graph
     similarity_graph = nx.Graph()
+    similarity_graph.add_nodes_from(docs.keys())
     
-    # Create MinHash objects for all documents
-    minhashes = {}
-    for doc_id, text in docs.items():
-        shingles = create_shingles(text, q)
-        minhashes[doc_id] = create_minhash(shingles, num_perm)
-        lsh.insert(str(doc_id), minhashes[doc_id])
-        similarity_graph.add_node(doc_id)
-        print(f"Processed document {doc_id}")
-
-    # Build similarity graph
-    processed_pairs = set()
-    for doc_id in docs.keys():
-        similar = lsh.query(minhashes[doc_id])
-        similar = {int(x) for x in similar}
-        
-        for other_id in similar:
-            if doc_id != other_id:
-                pair = tuple(sorted([doc_id, other_id]))
-                if pair not in processed_pairs:
-                    similarity = minhashes[doc_id].jaccard(minhashes[other_id])
-                    if threshold <= similarity < 0.40:
-                        similarity_graph.add_edge(doc_id, other_id, weight=similarity)
-                    processed_pairs.add(pair)
-
-    # Find initial clusters using Louvain
+    # Create MinHash signatures in batches
+    print("Creating MinHash signatures...")
+    minhashes = batch_minhash(docs, batch_size=1000, num_perm=num_perm, q=q)
+    
+    # Find candidate pairs using LSH banding
+    print("Finding candidate pairs...")
+    candidate_pairs = find_candidate_pairs(minhashes, threshold)
+    
+    # Verify candidate pairs and build similarity graph
+    print("Building similarity graph...")
+    for doc_id1, doc_id2 in candidate_pairs:
+        similarity = minhashes[doc_id1].jaccard(minhashes[doc_id2])
+        if threshold <= similarity < 0.40:
+            similarity_graph.add_edge(doc_id1, doc_id2, weight=similarity)
+    
+    # Find clusters using Louvain
+    print("Finding communities...")
     partition = community_louvain.best_partition(similarity_graph)
     
     # Create cluster dictionary
@@ -143,32 +182,50 @@ def find_topic_clusters(docs: Dict[int, str],
     for doc_id, cluster_id in partition.items():
         clusters[cluster_id].append(doc_id)
     
-    # Create initial cluster info
+    # Create cluster info with batched TF-IDF calculation
+    print("Creating cluster information...")
     cluster_info = {}
-    for cluster_id, doc_ids in clusters.items():
-        if len(doc_ids) >= min_cluster_size:
+    vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+    
+    # Process clusters that meet minimum size requirement
+    valid_clusters = {cid: doc_ids for cid, doc_ids in clusters.items() 
+                     if len(doc_ids) >= min_cluster_size}
+    
+    if valid_clusters:
+        # Prepare texts for all valid clusters at once
+        all_texts = []
+        cluster_doc_mapping = []
+        for cluster_id, doc_ids in valid_clusters.items():
             cluster_texts = [docs[doc_id] for doc_id in doc_ids]
+            all_texts.extend(cluster_texts)
+            cluster_doc_mapping.extend([cluster_id] * len(cluster_texts))
+        
+        # Calculate TF-IDF for all texts at once
+        tfidf_matrix = vectorizer.fit_transform(all_texts)
+        feature_names = vectorizer.get_feature_names_out()
+        
+        # Process each cluster
+        current_idx = 0
+        for cluster_id, doc_ids in valid_clusters.items():
+            n_docs = len(doc_ids)
+            cluster_tfidf = tfidf_matrix[current_idx:current_idx + n_docs]
+            
+            # Calculate average TF-IDF scores for the cluster
+            avg_scores = np.array(cluster_tfidf.mean(axis=0))[0]
+            top_indices = avg_scores.argsort()[-5:][::-1]  # Get top 5 terms
+            
             cluster_info[cluster_id] = {
                 'documents': sorted(doc_ids),
-                'size': len(doc_ids),
-                'top_terms': extract_top_terms(cluster_texts)
+                'size': n_docs,
+                'top_terms': [feature_names[i] for i in top_indices]
             }
+            current_idx += n_docs
     
-    # Merge clusters until reaching target number
-    final_clusters = merge_similar_clusters(cluster_info, docs, n_clusters)
+    # Merge similar clusters if needed
+    if len(cluster_info) > n_clusters:
+        cluster_info = merge_similar_clusters(cluster_info, docs, n_clusters)
     
-    return final_clusters
-
-
-
-
-
-
-
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import numpy as np
-import math
+    return cluster_info
 
 def create_cluster_word_viz(clusters, max_terms=10):
     """
@@ -290,33 +347,47 @@ def create_cluster_word_viz(clusters, max_terms=10):
     
     return fig
 
-
-
-
-
-
-
-
-
-
-
-
-
+def analyze_cluster_overlap(clusters, docs):
+    """Analyze term overlap between clusters to check distinctness"""
+    all_terms = set()
+    overlap_count = defaultdict(int)
+    
+    for cluster_id, info in clusters.items():
+        terms = set(info['top_terms'])
+        # Check overlap with existing terms
+        overlap = terms & all_terms
+        if overlap:
+            print(f"\nCluster {cluster_id} shares terms with other clusters:")
+            print(f"Overlapping terms: {', '.join(overlap)}")
+        all_terms.update(terms)
+        
+        # Count term frequencies across all documents in cluster
+        vectorizer = TfidfVectorizer(stop_words='english')
+        cluster_docs = [docs[doc_id] for doc_id in info['documents']]
+        tfidf = vectorizer.fit_transform(cluster_docs)
+        avg_tfidf = np.array(tfidf.mean(axis=0))[0]
+        
+        print(f"\nCluster {cluster_id} coherence:")
+        print(f"Average document similarity: {avg_tfidf.mean():.3f}")
+        print(f"Unique terms ratio: {len(set(info['top_terms']))/5:.2f}")
 
 # Example usage
 if __name__ == "__main__":
     # Get documents
     docs = {i: tweet for i, tweet in enumerate(df['tweet'])}
-    docs = dict(list(docs.items())[:10000])  # First 1000 tweets
+    docs = dict(list(docs.items())[:50000])  # First 1000 tweets
+    print("Processing hashtags...")
+    for i, tweet in enumerate(docs.values()):
+        docs[i] = process_tweet(tweet)
     
     # Find topic clusters
     clusters = find_topic_clusters(
         docs,
-        threshold=0.1,
+        threshold=0.2, #0.15
         num_perm=120,
-        q=5,
-        min_cluster_size=25,
-        n_clusters=5  # Specify desired number of clusters
+        q=4,
+        min_cluster_size=30,
+        n_clusters=5
     )
     
     # Print cluster information
@@ -333,3 +404,4 @@ if __name__ == "__main__":
     # # Example usage:
     fig = create_cluster_word_viz(clusters, 4)
     fig.show()
+    analyze_cluster_overlap(clusters, docs)
