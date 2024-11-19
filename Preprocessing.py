@@ -8,9 +8,14 @@ import os
 import re
 
 path = os.getcwd()
-path_trump = path + "\\data\\hashtag_donaldtrump.csv"
+if os.name == 'nt':  # For Windows
+    path_trump = path + "\\data\\hashtag_donaldtrump.csv"
+    path_biden = path + "\\data\\hashtag_joebiden.csv"
+else:  # For Unix/Linux/Mac
+    path_trump = path + "/data/hashtag_donaldtrump.csv"
+    path_biden = path + "/data/hashtag_joebiden.csv"
+
 trump = pd.read_csv(path_trump, lineterminator="\n")
-path_biden = path + "\\data\\hashtag_joebiden.csv"
 biden = pd.read_csv(path_biden, lineterminator="\n")
 trump["source"] = "Trump"
 biden["source"] = "Biden"
