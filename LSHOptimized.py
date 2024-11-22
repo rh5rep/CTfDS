@@ -8,30 +8,34 @@ import numpy as np
 from Preprocessing import df
 from community import community_louvain
 import plotly.graph_objects as go
-import plotly.express as px  # for colors
 from concurrent.futures import ThreadPoolExecutor
-import itertools
 from plotly.subplots import make_subplots
 from process_tweet import process_tweet
 import math
 
-
-
 POLITICAL_STOP_WORDS = [
-    'trump', 'biden', 'donald', 'joe', 'potus', '2020', 'trumps'
-    'election']
-
-# Combine with English stop words
+    'trump', 'biden', 'donald', 'joe', 'potus', '2020', 'trumps', 'realdonaldtrump', 'harris',
+    'save', 'yep', 'yes', 'nope', 'no', 'fa', 'oh', 'nytimes']
 CUSTOM_STOP_WORDS = list(ENGLISH_STOP_WORDS) + POLITICAL_STOP_WORDS
+MAX_FEATURES = 3000
 
 
-def create_shingles(text: str, n: int = 2) -> Set[str]:
-    """Convert text into n-grams (shingles) at the word level."""
-    words = text.split()  # Split the text into words
-    if len(words) < n:
+def create_vectorizer(max_features: int = MAX_FEATURES) -> TfidfVectorizer:
+    """Create a consistent TfidfVectorizer with standard parameters"""
+    return TfidfVectorizer(
+        stop_words=CUSTOM_STOP_WORDS,
+        max_features=max_features,
+        ngram_range=(1, 1),  # unigrams
+        min_df=4,  # minimum document frequency
+        max_df=0.8  # maximum document frequency
+    )
+
+def create_shingles(text: str, q: int = 5) -> Set[str]:
+    """Convert text into q-grams (shingles)"""
+    # Process only if text is long enough
+    if len(text) < q:
         return set()
-    return set(" ".join(words[i:i+n]) for i in range(len(words) - n + 1))
-
+    return set(text[i:i+q] for i in range(len(text)-q+1))
 
 def batch_minhash(docs: Dict[int, str], batch_size: int = 1000, num_perm: int = 128, q: int = 5) -> Dict[int, MinHash]:
     """Create MinHash objects in batches"""
@@ -41,7 +45,7 @@ def batch_minhash(docs: Dict[int, str], batch_size: int = 1000, num_perm: int = 
         batch_results = {}
         for doc_id, text in batch_items:
             m = MinHash(num_perm=num_perm)
-            shingles = create_shingles(text, n=2)
+            shingles = create_shingles(text, q)
             for shingle in shingles:
                 m.update(shingle.encode('utf-8'))
             batch_results[doc_id] = m
@@ -60,34 +64,52 @@ def batch_minhash(docs: Dict[int, str], batch_size: int = 1000, num_perm: int = 
     
     return minhashes
 
-def find_candidate_pairs(minhashes: Dict[int, MinHash], threshold: float, 
-                        num_bands: int = 24) -> Set[Tuple[int, int]]:
-    """Find candidate pairs using LSH with banding technique"""
-    n_rows = len(next(iter(minhashes.values())).hashvalues) // num_bands
-    candidate_pairs = set()
+def find_candidate_pairs(minhashes: Dict[int, MinHash], threshold: float) -> Set[Tuple[int, int]]:
+    """
+    Find candidate pairs using MinHashLSH with a specified similarity threshold
     
-    for band in range(num_bands):
-        band_buckets = defaultdict(list)
+    Args:
+        minhashes: Dictionary of document IDs to MinHash signatures
+        threshold: Jaccard similarity threshold for considering pairs
+    
+    Returns:
+        Set of document ID pairs that are potentially similar
+    """
+    # Create LSH index
+    lsh = MinHashLSH(threshold=threshold, num_perm=len(next(iter(minhashes.values())).hashvalues))
+    
+    # Add all documents to the LSH index
+    for doc_id, minhash in minhashes.items():
+        lsh.insert(doc_id, minhash)
+    
+    # Find candidate pairs
+    candidate_pairs = set()
+    processed_ids = set()
+    
+    for doc_id, minhash in minhashes.items():
+        # Skip if already processed to avoid duplicate pairs
+        if doc_id in processed_ids:
+            continue
         
-        # Hash document signatures within the current band
-        for doc_id, minhash in minhashes.items():
-            band_values = tuple(minhash.hashvalues[band * n_rows:(band + 1) * n_rows])
-            band_buckets[band_values].append(doc_id)
+        # Query for similar documents
+        similar_ids = lsh.query(minhash)
         
-        # Generate candidate pairs from documents in the same bucket
-        for bucket in band_buckets.values():
-            if len(bucket) > 1:
-                candidate_pairs.update(itertools.combinations(sorted(bucket), 2))
+        # Add pairs and mark as processed
+        for similar_id in similar_ids:
+            if similar_id != doc_id:
+                candidate_pairs.add(tuple(sorted((doc_id, similar_id))))
+        
+        processed_ids.add(doc_id)
     
     return candidate_pairs
 
-def merge_similar_clusters(clusters: Dict[int, Dict], docs: Dict[int, str], target_clusters: int) -> Dict[int, Dict]:
+def merge_similar_clusters(clusters: Dict[int, Dict], docs: Dict[int, str], target_clusters: int, n_terms: int) -> Dict[int, Dict]:
     """Merge similar clusters until reaching target number of clusters"""
     if len(clusters) <= target_clusters:
         return clusters
     
     # Create TF-IDF vectors for each cluster
-    vectorizer = TfidfVectorizer(stop_words='english')
+    vectorizer = TfidfVectorizer(stop_words=CUSTOM_STOP_WORDS)
     cluster_texts = {}
     for cluster_id, info in clusters.items():
         # Concatenate all texts in cluster
@@ -125,7 +147,7 @@ def merge_similar_clusters(clusters: Dict[int, Dict], docs: Dict[int, str], targ
         clusters[cluster1] = {
             'documents': new_docs,
             'size': len(new_docs),
-            'top_terms': extract_top_terms(new_texts)
+            'top_terms': extract_top_terms(new_texts, n_terms=n_terms)
         }
         
         # Remove merged cluster and its text
@@ -136,7 +158,7 @@ def merge_similar_clusters(clusters: Dict[int, Dict], docs: Dict[int, str], targ
 
 def extract_top_terms(texts: List[str], n_terms: int = 5) -> List[str]:
     """Extract the most significant terms from a group of tweets using TF-IDF"""
-    vectorizer = TfidfVectorizer(stop_words=CUSTOM_STOP_WORDS, max_features=1000)
+    vectorizer = create_vectorizer()
     tfidf_matrix = vectorizer.fit_transform(texts)
     
     avg_scores = np.array(tfidf_matrix.mean(axis=0))[0]
@@ -150,6 +172,8 @@ def find_topic_clusters(docs: Dict[int, str],
                        num_perm: int = 120,
                        q: int = 4,
                        min_cluster_size: int = 5,
+                       n_terms: int = 5,
+                       batch_size: int = 1000,
                        n_clusters: int = 10) -> Dict[int, Dict]:
     """
     Optimized version of topic clustering using LSH and banding technique
@@ -160,7 +184,7 @@ def find_topic_clusters(docs: Dict[int, str],
     
     # Create MinHash signatures in batches
     print("Creating MinHash signatures...")
-    minhashes = batch_minhash(docs, batch_size=1000, num_perm=num_perm, q=q)
+    minhashes = batch_minhash(docs, batch_size=batch_size, num_perm=num_perm, q=q)
     
     # Find candidate pairs using LSH banding
     print("Finding candidate pairs...")
@@ -185,7 +209,7 @@ def find_topic_clusters(docs: Dict[int, str],
     # Create cluster info with batched TF-IDF calculation
     print("Creating cluster information...")
     cluster_info = {}
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+    vectorizer = create_vectorizer()
     
     # Process clusters that meet minimum size requirement
     valid_clusters = {cid: doc_ids for cid, doc_ids in clusters.items() 
@@ -212,7 +236,7 @@ def find_topic_clusters(docs: Dict[int, str],
             
             # Calculate average TF-IDF scores for the cluster
             avg_scores = np.array(cluster_tfidf.mean(axis=0))[0]
-            top_indices = avg_scores.argsort()[-5:][::-1]  # Get top 5 terms
+            top_indices = avg_scores.argsort()[-n_terms:][::-1]  # Get top n_terms
             
             cluster_info[cluster_id] = {
                 'documents': sorted(doc_ids),
@@ -223,174 +247,186 @@ def find_topic_clusters(docs: Dict[int, str],
     
     # Merge similar clusters if needed
     if len(cluster_info) > n_clusters:
-        cluster_info = merge_similar_clusters(cluster_info, docs, n_clusters)
+        cluster_info = merge_similar_clusters(cluster_info, docs, n_clusters, n_terms)
     
     return cluster_info
 
-def create_cluster_word_viz(clusters, max_terms=10):
+def create_cluster_wordclouds(clusters, max_terms=10):
     """
-    Create a visualization where each cluster is represented by its key terms
-    with the most significant term larger in the center
-    
-    Args:
-        clusters: Dictionary of clusters from find_topic_clusters()
-        max_terms: Maximum number of terms to show per cluster
+    Create a visualization of word clouds for each cluster using Plotly
+    to maintain consistency with create_cluster_word_viz()
     """
-    # Calculate grid dimensions
     n_clusters = len(clusters)
-    n_cols = min(3, n_clusters)  # Maximum 3 columns
+    n_cols = min(3, n_clusters)
     n_rows = math.ceil(n_clusters / n_cols)
     
-    # Create figure with subplots
     fig = make_subplots(
         rows=n_rows, 
         cols=n_cols,
-        subplot_titles=[f'Cluster {i}' for i in range(n_clusters)],
-        vertical_spacing=0.2,
-        horizontal_spacing=0.1
+        subplot_titles=[f'Cluster {i+1}' for i in range(n_clusters)],
+        vertical_spacing=0.15,
+        horizontal_spacing=0.05
     )
-    
-    # Colors for different clusters
+    # Increase font size of subplot titles
+    for annotation in fig.layout.annotations:
+        annotation.font.size = 30  # Font size of subplot titles
+
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
               '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
     
-    for idx, (cluster_id, info) in enumerate(clusters.items()):
+    def get_text_dimensions(term, size):
+        """Estimate text dimensions based on term length and font size"""
+        char_width = size / 2  # Approximate width per character
+        char_height = size  # Approximate height
+        return len(term) * char_width / 100, char_height / 100  # Scale down to plot units
+    
+    def check_overlap(x1, y1, w1, h1, x2, y2, w2, h2, padding=0.1):
+        """Check if two text boxes overlap"""
+        return not (x1 + w1/2 + padding < x2 - w2/2 or
+                   x1 - w1/2 - padding > x2 + w2/2 or
+                   y1 + h1/2 + padding < y2 - h2/2 or
+                   y1 - h1/2 - padding > y2 + h2/2)
+    
+    def generate_positions(terms, sizes):
+        """Generate non-overlapping positions for terms"""
+        positions = []
+        
+        # Start with center position for first term
+        first_width, first_height = get_text_dimensions(terms[0], sizes[0])
+        positions.append((0, 0, first_width, first_height))
+        
+        # Place remaining terms
+        for i in range(1, len(terms)):
+            term = terms[i]
+            size = sizes[i]
+            width, height = get_text_dimensions(term, size)
+            
+            # Try positions at increasing distances from center
+            base_radius = 0.3  # Start closer to center
+            radius_step = 0.1
+            angle_step = np.pi / 8
+            
+            for radius in np.arange(base_radius, 1.0, radius_step):
+                for angle in np.arange(0, 2*np.pi, angle_step):
+                    x = radius * np.cos(angle)
+                    y = radius * np.sin(angle)
+                    
+                    # Check overlap with all existing terms
+                    overlaps = False
+                    for px, py, pw, ph in positions:
+                        if check_overlap(x, y, width, height, px, py, pw, ph):
+                            overlaps = True
+                            break
+                    
+                    if not overlaps:
+                        positions.append((x, y, width, height))
+                        break
+                
+                if len(positions) > i:  # If position was found
+                    break
+            
+            # If no position found, place at default position
+            if len(positions) <= i:
+                positions.append((radius * np.cos(i * 2*np.pi/len(terms)), 
+                                radius * np.sin(i * 2*np.pi/len(terms)),
+                                width, height))
+        
+        return [(x, y) for x, y, w, h in positions]
+    
+    for idx, (_, info) in enumerate(clusters.items()):
         row = idx // n_cols + 1
         col = idx % n_cols + 1
         color = colors[idx % len(colors)]
         
-        # Get top terms (limit to max_terms)
         terms = info['top_terms'][:max_terms]
         
-        # Calculate positions for terms in a circular pattern
-        n_outer_terms = len(terms) - 1  # All terms except the main one
-        radius = 0.4  # Radius for outer terms
+        # Calculate term sizes
+        base_size = 50
+        size_decay = 0.85
+        term_sizes = [base_size * (size_decay ** i) for i in range(len(terms))]
         
-        # Center position for the main term
-        fig.add_trace(
-            go.Scatter(
-                x=[0],
-                y=[0],
-                text=[terms[0]],
-                mode='text',
-                textfont=dict(
-                    size=40,  # Larger size for main term
-                    color=color,
-                    family='Arial Black'
-                ),
-                hoverinfo='text',
-                hovertext=f'Main topic: {terms[0]}',
-                showlegend=False
-            ),
-            row=row,
-            col=col
-        )
+        # Generate non-overlapping positions
+        positions = generate_positions(terms, term_sizes)
         
-        # Add size indicator
-        fig.add_annotation(
-            text=f'Size: {info["size"]} documents',
-            xref=f'x{idx+1}',
-            yref=f'y{idx+1}',
-            x=0,
-            y=1,
-            showarrow=False,
-            font=dict(size=12),
-            row=row,
-            col=col
-        )
-        
-        # Position other terms in a circle around the main term
-        if n_outer_terms > 0:
-            for i, term in enumerate(terms[1:], 1):
-                angle = (2 * np.pi * (i-1) / n_outer_terms) - (np.pi/2)
-                x = radius * np.cos(angle)
-                y = radius * np.sin(angle)
-                
-                # Calculate font size based on position in list
-                font_size = max(15, 30 - (i * 2))  # Decreasing size for less important terms
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=[x],
-                        y=[y],
-                        text=[term],
-                        mode='text',
-                        textfont=dict(
-                            size=font_size,
-                            color=color,
-                            family='Arial'
-                        ),
-                        hoverinfo='text',
-                        hovertext=f'Term: {term}',
-                        showlegend=False
+        # Add terms to plot
+        for i, (term, size, (x, y)) in enumerate(zip(terms, term_sizes, positions)):
+            opacity = 1.0 - (i * 0.5 / len(terms))
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=[x],
+                    y=[y],
+                    text=[term],
+                    mode='text',
+                    textfont=dict(
+                        size=size,
+                        color=color,
+                        family='Arial Black' if i == 0 else 'Arial'
                     ),
-                    row=row,
-                    col=col
-                )
-    
-    # Update layout
+                    opacity=opacity,
+                    hoverinfo='text',
+                    hovertext=f'Term: {term}',
+                    showlegend=False
+                ),
+                row=row,
+                col=col
+            )
+            
     fig.update_layout(
-        title_text="Topic Clusters - Most Significant Terms",
+        title_text="Topic Clusters - Word Importance",
         title_x=0.5,
-        title_font_size=24,
-        height=400 * n_rows,
-        width=1000,
+        title_font_size=35,
+        height=600 * n_rows,
+        width=1500,
         showlegend=False,
         paper_bgcolor='white',
         plot_bgcolor='white'
     )
     
-    # Update axes for all subplots
     for i in range(1, n_clusters + 1):
-        fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, range=[-1, 1], row=(i-1)//n_cols + 1, col=(i-1)%n_cols + 1)
-        fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, range=[-1, 1], row=(i-1)//n_cols + 1, col=(i-1)%n_cols + 1)
+        fig.update_xaxes(
+            showgrid=False, 
+            zeroline=False, 
+            showticklabels=False, 
+            range=[-1.2, 1.2], 
+            row=(i-1)//n_cols + 1, 
+            col=(i-1)%n_cols + 1
+        )
+        fig.update_yaxes(
+            showgrid=False, 
+            zeroline=False, 
+            showticklabels=False, 
+            range=[-1.2, 1.2], 
+            row=(i-1)//n_cols + 1, 
+            col=(i-1)%n_cols + 1
+        )
     
     return fig
 
-def analyze_cluster_overlap(clusters, docs):
-    """Analyze term overlap between clusters to check distinctness"""
-    all_terms = set()
-    overlap_count = defaultdict(int)
-    
-    for cluster_id, info in clusters.items():
-        terms = set(info['top_terms'])
-        # Check overlap with existing terms
-        overlap = terms & all_terms
-        if overlap:
-            print(f"\nCluster {cluster_id} shares terms with other clusters:")
-            print(f"Overlapping terms: {', '.join(overlap)}")
-        all_terms.update(terms)
-        
-        # Count term frequencies across all documents in cluster
-        vectorizer = TfidfVectorizer(stop_words='english')
-        cluster_docs = [docs[doc_id] for doc_id in info['documents']]
-        tfidf = vectorizer.fit_transform(cluster_docs)
-        avg_tfidf = np.array(tfidf.mean(axis=0))[0]
-        
-        print(f"\nCluster {cluster_id} coherence:")
-        print(f"Average document similarity: {avg_tfidf.mean():.3f}")
-        print(f"Unique terms ratio: {len(set(info['top_terms']))/5:.2f}")
 
-# Example usage
+
+
 if __name__ == "__main__":
-    # Get documents
+    TERMS = 6
     docs = {i: tweet for i, tweet in enumerate(df['tweet'])}
-    docs = dict(list(docs.items())[:50000])  # First 1000 tweets
+    docs = dict(list(docs.items())[:10000])  # First 1000 tweets
+    
     print("Processing hashtags...")
-    for i, tweet in enumerate(docs.values()):
-        docs[i] = process_tweet(tweet)
+    docs = dict(zip(docs.keys(), map(process_tweet, docs.values())))
     
     # Find topic clusters
+    # TODO: Now it's about tuning these parameters to get the best results
     clusters = find_topic_clusters(
         docs,
-        threshold=0.2, #0.15
+        threshold=0.2, #0.25
         num_perm=120,
-        q=4,
-        min_cluster_size=30,
-        n_clusters=5
+        q=4, #4
+        min_cluster_size=20, #30
+        n_terms=TERMS, #10
+        batch_size=1000,
+        n_clusters=6
     )
     
-    # Print cluster information
     print(f"\nFound {len(clusters)} topic clusters:")
     for cluster_id, info in clusters.items():
         print(f"\nCluster {cluster_id}:")
@@ -399,9 +435,7 @@ if __name__ == "__main__":
         print("\nExample documents:")
         for doc_id in info['documents'][:3]:
             print(f"- {docs[doc_id][:100]}...")
-        print("---")
+        print(24*"-")
 
-    # # Example usage:
-    fig = create_cluster_word_viz(clusters, 4)
+    fig = create_cluster_wordclouds(clusters, max_terms=TERMS)
     fig.show()
-    analyze_cluster_overlap(clusters, docs)

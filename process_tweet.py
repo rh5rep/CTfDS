@@ -11,7 +11,7 @@ def process_tweet(text):
     return processed_text
 
 # Example usage
-text = "The US is the Best Country in the world! #USA #US #America!! #UnitedStates!"
-processed_text = process_tweet(text)
-print(processed_text)
+# text = "The US is the Best Country in the world! #USA #US #America!! #UnitedStates!"
+# processed_text = process_tweet(text)
+# print(processed_text)
 
