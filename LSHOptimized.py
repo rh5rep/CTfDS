@@ -5,12 +5,11 @@ from collections import defaultdict
 from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-from Preprocessing import df
+from Preprocessing import df, process_tweet
 from community import community_louvain
 import plotly.graph_objects as go
 from concurrent.futures import ThreadPoolExecutor
 from plotly.subplots import make_subplots
-from process_tweet import process_tweet
 import math
 
 POLITICAL_STOP_WORDS = [
@@ -410,7 +409,7 @@ def create_cluster_wordclouds(clusters, max_terms=10):
 if __name__ == "__main__":
     TERMS = 6
     docs = {i: tweet for i, tweet in enumerate(df['tweet'])}
-    docs = dict(list(docs.items())[:100000])  # First 1000 tweets
+    # docs = dict(list(docs.items())[:100000])  # First 1000 tweets
     
     print("Processing hashtags...")
     docs = dict(zip(docs.keys(), map(process_tweet, docs.values())))
