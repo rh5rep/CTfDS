@@ -1,7 +1,7 @@
 #%%
 import plotly.graph_objects as go
 from baselinedata   import *
-from plotnewnew import *
+from plot_sentiment import *
 
 # Combine the two datasets into a single DataFrame
 combined_df = state_votes.merge(tweet_counts_per_state[['state_code', 'democratic_proportion', 'republican_proportion', 'lead_size']], left_on='state_po', right_on='state_code', how='left')
@@ -35,7 +35,7 @@ fig.show()
 import plotly.graph_objects as go
 import numpy as np
 from baselinedata import *
-from plotnewnew import *
+from plot_sentiment import *
 
 # Merge datasets
 combined_df = state_votes.merge(
