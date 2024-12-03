@@ -16,7 +16,7 @@ else:  # For Unix/Linux/Mac
     path_biden = path + "/data/hashtag_joebiden.csv"
 
 trump = pd.read_csv(path_trump, lineterminator="\n")
-path_biden = path + "\\data\\hashtag_joebiden.csv"
+# path_biden = path + "\\data\\hashtag_joebiden.csv"
 biden = pd.read_csv(path_biden, lineterminator="\n")
 trump["source"] = "Trump"
 biden["source"] = "Biden"
