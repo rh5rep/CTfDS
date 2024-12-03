@@ -16,6 +16,7 @@ else:  # For Unix/Linux/Mac
     path_biden = path + "/data/hashtag_joebiden.csv"
 
 trump = pd.read_csv(path_trump, lineterminator="\n")
+path_biden = path + "\\data\\hashtag_joebiden.csv"
 biden = pd.read_csv(path_biden, lineterminator="\n")
 trump["source"] = "Trump"
 biden["source"] = "Biden"
@@ -38,6 +39,7 @@ us_states = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado
              "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming"]
 
 df =df[df["state"].isin(us_states)]
+df["tweet"] = df["tweet"].str.lower().str.replace(r'\s+', ' ', regex=True)
 print(len(df))
 
 
@@ -95,8 +97,6 @@ testdf["tweet_about"] = "None"
 filtered_tweets_trump = df[mask_trump & ~mask_biden]
 filtered_tweets_biden = df[mask_biden & ~mask_trump]
 
-testdf.loc[mask_trump & ~mask_biden, 'tweet_about'] = 'trump'
-testdf.loc[mask_biden & ~mask_trump, 'tweet_about'] = 'biden'
 
 filtered_tweets = testdf[(mask_trump & ~mask_biden) ^ (mask_biden & ~mask_trump)]
 filtered_tweets = filtered_tweets.drop_duplicates(subset=["tweet"])
