@@ -136,3 +136,5 @@ cython_debug/
 
 ne_10m_admin_1_states_provinces.zip
 map/
+.DS_Store
+*.pkl
