@@ -1,17 +1,16 @@
 # %%
 import pandas as pd
 import plotly.express as px
-# import os
+import os
 import pickle
 
-# # Load election data
-# cwd = os.getcwd()
-# df = pd.read_csv(cwd + '/data/PRESIDENT_precinct_general.csv')
-# df = pd.read_csv('PRESIDENT_precinct_general.csv')
+# Load election data
+cwd = os.getcwd()
+file_path = cwd + '/data/PRESIDENT_precinct_general.csv'
 
-with open('/Users/rami/Documents/DTU/Semester 1/Computational Tools for Data Science/CTfDS/data/filtered_president_precinct_general.pkl', 'rb') as file:
-    df = pickle.load(file)
-    # print(df)
+# Load the data
+df = pd.read_csv(file_path)
+
 # Filter the DataFrame
 # Group the filtered DataFrame by state and candidate, and sum the votes
 state_votes = df.groupby(['state_po', 'candidate'])['votes'].sum().unstack(fill_value=0)
