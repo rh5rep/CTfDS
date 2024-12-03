@@ -4,12 +4,13 @@ import plotly.express as px
 from Preprocessing import filtered_tweets_biden, filtered_tweets_trump, filtered_tweets
 import pickle 
 import random
+#%%
 # Load the filtered tweets from a pickle file
-with open('/Users/rami/Documents/DTU/Semester 1/Computational Tools for Data Science/CTfDS/Data/filtered_tweetsC.pkl', 'rb') as file:
+with open('filtered_tweets_nlp.pkl', 'rb') as file:
     filtered_tweets = pickle.load(file)
 # Add a column 'party' with random assignment of 'Democratic' or 'Republican'
 # filtered_tweets['party'] = [random.choice(['Democratic', 'Republican']) for _ in range(len(filtered_tweets))]
-
+#%%
 
 # Define a mapping for US states to Plotly's choropleth map
 state_abbreviations = {
@@ -44,9 +45,70 @@ sentiment_counts['republican_proportion'] = sentiment_counts.get(2, 0) / (sentim
 print(sentiment_counts.columns)
 
 
+
+#%%
+##open new csv as pandas
+df_pres = pd.read_csv('data/1976-2020-president.csv')
+# filter for only democrate and republican
+df_pres = df_pres[df_pres['party_detailed'].isin(['DEMOCRAT', 'REPUBLICAN'])]
+# filter for only president
+df_pres = df_pres[df_pres['office'] == 'US PRESIDENT']
+# print first 5 rows
+# print(df_pres.head())
+## remove 2020 year
+df_pres = df_pres[df_pres['year'] != 2020]
+
+## add ratio comments to the data
+df_pres['ratio'] =0
+for row in df_pres.iterrows():
+    year = row[1]['year']
+    total_votes = df_pres[(df_pres['year'] == year) & (df_pres['state'] == row[1]["state"])]['candidatevotes'].sum()
+    df_pres.loc[row[0], 'ratio'] = row[1]['candidatevotes'] / total_votes
+# df_pres['ratio'] = df_pres['candidatevotes'] / df_pres['totalvotes']
+
+# average per state per party
+df_pres = df_pres.groupby([ "state",'state_po', 'party_detailed'])['ratio'].mean().reset_index()
+# print the texas stats
+print(df_pres[df_pres['state'] == 'TEXAS'])
+# print first 5 rows   
+#%%
+for row in sentiment_counts.iterrows():
+    state = (row[0]).upper()
+    dem_ratio = df_pres[(df_pres['state'] == state) & 
+                        (df_pres['party_detailed'] == 'DEMOCRAT')]['ratio'].values[0]  * row[1]['democratic_proportion']
+    rep_ratio = df_pres[(df_pres['state'] == state) & 
+                        (df_pres['party_detailed'] == 'REPUBLICAN')]['ratio'].values[0] * row[1]['republican_proportion']
+    
+    if state=="TEXAS":
+        print("==========")
+        print(sentiment_counts.loc['Texas'])
+
+        print(sentiment_counts.loc[row[0], 'democratic_proportion'], "dem")
+        print(sentiment_counts.loc[row[0], 'republican_proportion'], "rep")
+
+        print(dem_ratio, "dem ratio from election")
+        print(rep_ratio, "rep ratio from election")
+
+        print("post dem" , sentiment_counts.loc[row[0], 'democratic_proportion'] * dem_ratio)
+        print("post rep", sentiment_counts.loc[row[0], 'republican_proportion']* rep_ratio)
+        print("==========")
+    sentiment_counts.loc[row[0], 'democratic_proportion'] = dem_ratio /(dem_ratio+rep_ratio) 
+    sentiment_counts.loc[row[0], 'republican_proportion'] = rep_ratio /(dem_ratio+rep_ratio) 
+print(sentiment_counts.loc['Texas'])
+print("==========")
+
+# %%
 # Merge sentiment proportions with tweet counts
 tweet_counts_per_state = tweet_counts_per_state.merge(sentiment_counts, left_on='state', right_index=True)
-
+custom_color_scale = [
+    (0.0, "red"),
+    (0.30, "lightcoral"),
+    (0.45, "lightpink"),
+    (0.5, "white"),
+    (0.55, "lightblue"),
+    (0.80, "lightskyblue"),
+    (1.0, "blue")
+]
 # Create the choropleth map
 fig = px.choropleth(
     tweet_counts_per_state,         # DataFrame with tweet data
@@ -56,12 +118,14 @@ fig = px.choropleth(
     hover_name='state',             # Hover over the state to show name
     hover_data={
         'tweet_count': True,
-        'democratic_proportion': ':.2f',
-        'republican_proportion': ':.2f'
+        'democratic_proportion': ':.3f',
+        'republican_proportion': ':.3f'
         # 1: 'Democratic',
         # 2: 'Republican'
     },
     color_continuous_scale=px.colors.diverging.RdBu[::1],  # Red to blue gradient
+    # color_continuous_scale=custom_color_scale,  # Red to blue gradient
+    color_continuous_midpoint = 0.5,
     labels={'democratic_proportion': 'Democratic Proportion'}
 )
 
@@ -87,7 +151,6 @@ fig.update_layout(
 
 # Show the plot
 fig.show()
-print(file)
 
 
 # %%
@@ -105,3 +168,4 @@ data_dict = {
 
 print(data_dict)
 # %%
+
