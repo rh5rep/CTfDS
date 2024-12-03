@@ -1,3 +1,3 @@
-# Hello
-This is a sentimal analysis project for the course "Computational Tools for Data Science" at the Technical University of Denmark.
-
+# U.S. 2020 Election Tweets Analysis
+This is a project for the course 02807 Computational Tools for Data Science at the Technical University of Denmark. 
+In this project, a large datasets of social media posts has been analyzed to see whether social media activity could help predict the outcome of an election. To be more specific, the social media posts are from Twitter and they are about the 2020 U.S. Presidential Election. Using sentiment analysis, the political views of the posts have been mapped to provide a visual representation of Democratic and Republican support across different states. Additionally, locality-sensitive hashing (LSH) and TF-IDF were applied to find the most common topics discussed in the posts from Twitter. By comparing the most common topics with actual voter responses, it was investigated how closely social media activity alligns with people’s reasoning for voting choices.
