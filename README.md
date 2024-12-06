@@ -14,7 +14,6 @@ Analysis of Twitter sentiment and topics during the 2020 U.S. Presidential Elect
 ```bash
 git clone https://github.com/rh5rep/CTfDS.git
 cd CTfDS
-pip install -r requirements.txt
 ```
 
 ## Data Processing Pipeline
@@ -48,10 +47,13 @@ CTFDS/
 ## Dependencies
 - Python 3.8+
 - Pandas
-- NLTK
+- Spacy
+- VADERsentiment
 - Plotly
 - Scikit-learn
 - Louvian Community
+- NLB
+- Numpy
 
 ## Team
 - Ceccuti, Jacopo
