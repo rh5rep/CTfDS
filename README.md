@@ -47,10 +47,13 @@ CTFDS/
 ## Dependencies
 - Python 3.8+
 - Pandas
-- NLTK
+- Spacy
+- VADERsentiment
 - Plotly
 - Scikit-learn
 - Louvian Community
+- NLB
+- Numpy
 
 ## Team
 - Ceccuti, Jacopo
