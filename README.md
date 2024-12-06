@@ -14,7 +14,6 @@ Analysis of Twitter sentiment and topics during the 2020 U.S. Presidential Elect
 ```bash
 git clone https://github.com/rh5rep/CTfDS.git
 cd CTfDS
-pip install -r requirements.txt
 ```
 
 ## Data Processing Pipeline
