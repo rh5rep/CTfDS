@@ -1,3 +1,66 @@
-# U.S. 2020 Election Tweets Analysis
-This is a project for the course 02807 Computational Tools for Data Science at the Technical University of Denmark. 
-In this project, a large datasets of social media posts has been analyzed to see whether social media activity could help predict the outcome of an election. To be more specific, the social media posts are from Twitter and they are about the 2020 U.S. Presidential Election. Using sentiment analysis, the political views of the posts have been mapped to provide a visual representation of Democratic and Republican support across different states. Additionally, locality-sensitive hashing (LSH) and TF-IDF were applied to find the most common topics discussed in the posts from Twitter. By comparing the most common topics with actual voter responses, it was investigated how closely social media activity alligns with people’s reasoning for voting choices.
+# U.S. 2020 Election Twitter Analysis
+
+## Overview
+Analysis of Twitter sentiment and topics during the 2020 U.S. Presidential Election using natural language processing and machine learning techniques. Part of course 02807 Computational Tools for Data Science at DTU.
+
+## Features
+- Sentiment analysis of tweets by state
+- Political alignment prediction
+- Topic modeling using LSH and TF-IDF
+- Choropleth visualization of results
+- Comparison with actual election outcomes
+
+## Installation
+```bash
+git clone https://github.com/rh5rep/CTfDS.git
+cd CTfDS
+pip install -r requirements.txt
+```
+
+## Data Processing Pipeline
+- Tweet collection and filtering
+- NLP preprocessing
+- Sentiment analysis
+- Geographic clustering
+- Topic extraction
+
+## Analysis Methods
+- **Sentiment Analysis**: NLP-based political alignment detection
+- **LSH**: Finding similar tweet clusters
+- **TF-IDF**: Topic extraction and keyword analysis
+- **Geospatial Analysis**: State-wise distribution
+
+## Visualization
+- Interactive choropleth maps using Plotly
+- Sentiment distribution heatmaps
+- Topic frequency charts
+- Comparative analysis with election results
+
+## Directory Structure
+```
+CTFDS/
+├── data/
+├── code.ipynb
+├── venv/
+└── README.md
+```
+
+## Dependencies
+- Python 3.8+
+- Pandas
+- NLTK
+- Plotly
+- Scikit-learn
+- Louvian Community
+
+## Team
+- Ceccuti, Jacopo
+- El-Madani, Mustafa Jawad
+- Hanna, Rami Ishac
+- Yar, Mads
+
+## Course
+02807 Computational Tools for Data Science
+
+## Institution
+Technical University of Denmark
